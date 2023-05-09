@@ -1,3 +1,27 @@
+RE_SCRIPT = re.compile(r"window\.__NUXT")
+
+# The content is stored in a custom encoded format.  The encoded
+# content is in the middle of a huge one line JS snippet.
+# The relevant part starts from appolo:{"....  and the actual content
+# is in a "content" field with a ({\"isFullcontent\": right next to
+# it.
+RE_CONTENT = re.compile(
+    r'.*apollo:{.*content\({\\"isFullContent\\":(?:true|false)}\)":"([^"]+).*'
+)
+
+def get_content(uri):
+    """Get content for chapter specified URI component URI.
+    URL used is https://tamil.pratilipi.com + URI.
+
+    """
+    soup = bs4.BeautifulSoup(req.urlopen("https://tamil.pratilipi.com" + uri))
+    script = soup.find("body").find(name="script", string=RE_SCRIPT)
+    content = re.match(RE_CONTENT, script).group(1)
+    # The content itself is a JS-escaped string so we need to take
+    # care of \\uXXXX parts hence this byte dance.
+    content = bytes(content,"ascii").decode("unicode_script")
+    return decode_content(content)
+
 # TODO: Both encode and decode are broken.
 def decode_content(content):
     """Decode the custom encoded content in the string CONTENT."""

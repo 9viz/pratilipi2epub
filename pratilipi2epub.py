@@ -24,7 +24,6 @@ GRAPHQL_SERIES_PARTS = """query getSeriesPartsPaginatedBySlug($where: GetSeriesI
             title\
             readPageUrl\
             publishedAt\
-            author { id displayName }
           }\
         }\
       }\
@@ -32,15 +31,7 @@ GRAPHQL_SERIES_PARTS = """query getSeriesPartsPaginatedBySlug($where: GetSeriesI
   }\
 }"""
 
-ACCESS_TOKEN = ""
-
-def access_token():
-    global ACCESS_TOKEN
-    if not ACCESS_TOKEN:
-        r = req.urlopen("https://gamma.pratilipi.com/api/user/accesstoken")
-        r = r.read()
-        ACCESS_TOKEN = json.loads(r)["accessToken"]
-    return ACCESS_TOKEN
+BASE_URL = "https://tamil.pratilipi.com"
 
 def get_slug(uri):
     """Get the slug part from the series url URI."""
@@ -76,15 +67,57 @@ def get_series_part(slug, limit=20, cursor=0):
     )
     return json.loads(req.urlopen(r).read())
 
+def get_author(slug):
+    """Return the author for the slug SLUG."""
+
+    query = {
+        "operationName": "getSeriesPartsPaginatedBySlug",
+        "variables": {
+            "where": {
+                "seriesSlug": slug
+            },
+            "page": {
+                "limit": 1,
+                "cursor": "1",
+            },
+        },
+        "query": """query getSeriesPartsPaginatedBySlug($where: GetSeriesInput!, $page: LimitCursorPageInput) {\
+  getSeries(where: $where) {\
+    series {\
+      publishedParts(page: $page) {\
+        parts {\
+          pratilipi {\
+            author { displayName }
+          }\
+        }\
+      }\
+    }\
+  }\
+}""",
+    }
+    query = json.dumps(query, separators=(",", ":"))
+    r = req.Request(
+        "https://tamil.pratilipi.com/graphql",
+        headers={
+            "Apollographql-client-name": "WEB_prod",
+            "Apollographql-client-version": "1.0.0",
+            "Content-type": "application/json"
+        },
+        data=query.encode()
+    )
+    data = json.loads(req.urlopen(r).read())
+    data = data["data"]["getSeries"]["series"]["publishedParts"]["parts"]
+    return data[0]["pratilipi"]["author"]["displayName"]
+
 # TODO: Include author.
 locale.setlocale(locale.LC_TIME, "ta_IN")
 def extract_links(slug):
     """Extract `readPageUrl' links for all chapters in SLUG.
-    A dictionary is returned whose key is the title of the chapter and
-    value is a list [ `readPageUrl', `publishedAt' formatted ].
+    A nested list is returned in the published were each list is of
+    the form [ `title', `readPageUrl', `publishedAt' formatted ].
 
     """
-    url = {}
+    url = []
     fetchp = True
     limit = 15
     cursor = 0
@@ -101,34 +134,10 @@ def extract_links(slug):
             t = i["publishedAt"]/1000
             t = time.localtime(t)
             t = time.strftime("%d %B %Y", t)
-            url[i["title"]] = [ i["readPageUrl"], t ]
+            url.append([ i["title"], i["readPageUrl"], t ])
         cursor += limit
 
     return url
-
-RE_SCRIPT = re.compile(r"window\.__NUXT")
-
-# The content is stored in a custom encoded format.  The encoded
-# content is in the middle of a huge one line JS snippet.
-# The relevant part starts from appolo:{"....  and the actual content
-# is in a "content" field with a ({\"isFullcontent\": right next to
-# it.
-RE_CONTENT = re.compile(
-    r'.*apollo:{.*content\({\\"isFullContent\\":(?:true|false)}\)":"([^"]+).*'
-)
-
-def get_content(uri):
-    """Get content for chapter specified URI component URI.
-    URL used is https://tamil.pratilipi.com + URI.
-
-    """
-    soup = bs4.BeautifulSoup(req.urlopen("https://tamil.pratilipi.com" + uri))
-    script = soup.find("body").find(name="script", string=RE_SCRIPT)
-    content = re.match(RE_CONTENT, script).group(1)
-    # The content itself is a JS-escaped string so we need to take
-    # care of \\uXXXX parts hence this byte dance.
-    content = bytes(content,"ascii").decode("unicode_script")
-    return decode_content(content)
 
 
 # Epub is a zip file with the following required files:
@@ -140,7 +149,7 @@ def get_content(uri):
 # . OEBPS/content.opf - this file lists all the files used by the epub.
 # . toc.ncx - this has the order of the files to be opened aka Table
 #   of Contents.
-# This wikipedia page has a very nice summary -
+# The epub wikipedia page has a very nice summary: https://en.wikipedia.org/wiki/EPUB#Version_2.0.1
 # Opening the epub archive yourself will also give you a good idea of
 # what needs to be done.
 
@@ -159,29 +168,25 @@ def prepare_content_opf(author, identifier, title, files):
         return f"""
 <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:opf="http://www.idpf.org/2007/opf">
  <dc:creator>{author}</dc:creator>
- <dc:identifier id="BookId" opf:scheme="?????">{identifier}</dc:identifier>
+ <dc:identifier id="BookId">{identifier}</dc:identifier>
  <dc:language>ta</dc:language>
  <dc:title>{title}</dc:title>
- <dc:subject/>
- <meta name="cover" content="Cover_v3.jpg"/> ??????
- <meta content="1.8.0" name="Sigil version"/> ?????
  <dc:date opf:event="modification" xmlns:opf="http://www.idpf.org/2007/opf">{date}</dc:date>
 </metadata>
         """
 
     def prep_manifest():
-        manifest = """<manifest>
-  <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
-        """
-        for i in files:
-            manifest += f"\n<item id='{i}' href="Text/{i}" media-type='application/html'/>"
-        manifest += "\n<manifest/>"
+        manifest = "<manifest>"
+        for n,i in enumerate(files):
+            # Filetype needs to xhtml.
+            manifest += f"""\n<item id='Chapter{n+1}' href="Text/{i}" media-type='application/xhtml+xml'/>"""
+        manifest += """\n<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n<manifest/>"""
         return manifest
 
     def prep_spine():
         spine = """<spine toc="ncx">"""
-        for i in files:
-            spine += f"\n<itemref idref='{i}'/>"
+        for i in range(len(files)):
+            spine += f"\n<itemref idref='Chapter{i+1}'/>"
         spine += "\n</spine>"
         return spine
 
@@ -189,18 +194,39 @@ def prepare_content_opf(author, identifier, title, files):
 <package version="2.0" unique-identifier="BookId" xmlns="http://www.idpf.org/2007/opf">
     """
 
-    def prep_guide():
-        return ""
-
+    # We don't need <guide> since we don't have a cover page or
+    # anything special like that.
     content += prep_metadata() + "\n\n"
     content += prep_manifest() + "\n\n"
     content += prep_spine() + "\n\n"
-    content += prep_guide() + "\n\n</package>"
+    content += "</package>"
 
     return content
 
-def prepare_toc_ncx(identifier, files):
-    return ""
+def prepare_toc_ncx(author, identifier, title, files):
+    toc = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN"
+"http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+
+<ncx version="2005-1" xml:lang="ta" xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <head>
+    <meta name="dtb:uid" content="{identifier}"/>
+    <meta name="dtb:depth" content="1"/>
+    <meta name="dtb:totalPageCount" content="0"/>
+    <meta name="dtb:maxPageNumber" content="0"/>
+  </head>
+
+  <docTitle><text>{title}</text></docTitle>
+  <docAuthor><text>{author}</text></docAuthor>
+  <navMap>
+    """
+    for n,i in enumerate(files):
+        toc += f"""\n<navPoint id="Chapter{n+1}" playOrder="{n+1}">
+        <navLabel><text>Chapter {n+1}</text></navLabel>
+        <content src="Text/{i}" />
+        </navPoint>"""
+    toc += "</navMap>\n</ncx>"
+    return toc
 
 def prepare_container_xml():
     return """<?xml version="1.0" encoding="UTF-8"?>
