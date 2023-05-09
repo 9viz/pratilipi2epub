@@ -129,3 +129,87 @@ def get_content(uri):
     # care of \\uXXXX parts hence this byte dance.
     content = bytes(content,"ascii").decode("unicode_script")
     return decode_content(content)
+
+
+# Epub is a zip file with the following required files:
+# . mimetype - which should be the first and contains the mimetype of
+#   the file---application/epub+zip.
+# . META-INF/container.xml - this file tells where the "root file" is.
+#   Root file is where the rest of the files listed below are stored.
+#   Usually the location is "OEBPS".
+# . OEBPS/content.opf - this file lists all the files used by the epub.
+# . toc.ncx - this has the order of the files to be opened aka Table
+#   of Contents.
+# This wikipedia page has a very nice summary -
+# Opening the epub archive yourself will also give you a good idea of
+# what needs to be done.
+
+def prepare_content_opf(author, identifier, title, files):
+    """Return the file content of content.opf as a string.
+    AUTHOR is the author of the story.  IDENTIFIER is an unique id
+    representing the story.  TITLE is the title/name of the story, and
+    FILES is a list of the HTML files.  FILES should NOT include other
+    files that are required/expected to be present in an epub file.
+    The unique identifier used for the epub file will always be
+    "BookId".
+    The FILES will be stored under OEBPS/Text/.
+    """
+    def prep_metadata():
+        date = time.strftime("%Y-%m-%d")
+        return f"""
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"  xmlns:opf="http://www.idpf.org/2007/opf">
+ <dc:creator>{author}</dc:creator>
+ <dc:identifier id="BookId" opf:scheme="?????">{identifier}</dc:identifier>
+ <dc:language>ta</dc:language>
+ <dc:title>{title}</dc:title>
+ <dc:subject/>
+ <meta name="cover" content="Cover_v3.jpg"/> ??????
+ <meta content="1.8.0" name="Sigil version"/> ?????
+ <dc:date opf:event="modification" xmlns:opf="http://www.idpf.org/2007/opf">{date}</dc:date>
+</metadata>
+        """
+
+    def prep_manifest():
+        manifest = """<manifest>
+  <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+        """
+        for i in files:
+            manifest += f"\n<item id='{i}' href="Text/{i}" media-type='application/html'/>"
+        manifest += "\n<manifest/>"
+        return manifest
+
+    def prep_spine():
+        spine = """<spine toc="ncx">"""
+        for i in files:
+            spine += f"\n<itemref idref='{i}'/>"
+        spine += "\n</spine>"
+        return spine
+
+    content = """<?xml version="1.0" encoding="utf-8">
+<package version="2.0" unique-identifier="BookId" xmlns="http://www.idpf.org/2007/opf">
+    """
+
+    def prep_guide():
+        return ""
+
+    content += prep_metadata() + "\n\n"
+    content += prep_manifest() + "\n\n"
+    content += prep_spine() + "\n\n"
+    content += prep_guide() + "\n\n</package>"
+
+    return content
+
+def prepare_toc_ncx(identifier, files):
+    return ""
+
+def prepare_container_xml():
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+    <rootfiles>
+        <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+   </rootfiles>
+</container>
+    """
+
+def prepare_mimetype():
+    return "application/epub+zip"
