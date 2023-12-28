@@ -210,7 +210,7 @@ func getContent(browser *rod.Browser, data []string, N int) (string, []ContentEx
 	page := browser.MustPage("https://tamil.pratilipi.com" + data[1])
 	defer page.MustClose()
 
-	page.MustWaitLoad()
+	page.MustWaitStable()
 	var contentBuilder strings.Builder
 	var extra []ContentExtra
 
@@ -228,7 +228,6 @@ func getContent(browser *rod.Browser, data []string, N int) (string, []ContentEx
     <title>`)
 	contentBuilder.WriteString(data[0])
 	contentBuilder.WriteString(`</title>
-    <link rel="stylesheet" href="css/main.css" type="text/css" />
   </head>
   <body>`)
 
@@ -266,7 +265,6 @@ OLoop:
 				contentBuilder.WriteString(html.UnescapeString(tok.String()))
 			}
 			dataSuggestion = false
-		// TODO:
 		case tok.Data == "img":
 			imgDone := false
 			for _, i := range tok.Attr {
