@@ -1,4 +1,5 @@
-// -*- compile-command: "go build pratilipi2epub.go"; -*-
+// Fetch Pratilipi (Tamil) series and convert to Epub.
+// Licensed under BSD 2-Clause License.
 package main
 
 import (
